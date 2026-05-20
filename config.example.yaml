@@ -1,0 +1,45 @@
+# 复制为 config.yaml 后修改
+
+# 本地加密密钥（任意字符串，用于加密保存的 token）
+secret_key: "请改成你自己的随机字符串"
+
+# 高德地图 Key（登录时解析地址用）https://lbs.amap.com/
+amap_key: ""
+
+# 预约商品 ID（可在 i茅台 App 商品页抓包或查开源项目更新）
+# 常见：10941 飞天500ml | 10942 飞天100ml 等，以 App 当前为准
+items:
+  - code: "10941"
+    name: "飞天茅台500ml"
+  - code: "10942"
+    name: "飞天茅台100ml"
+
+# 门店策略: max_inventory=本市该商品库存最大(推荐) | nearest=距离最近
+shop_strategy: max_inventory
+
+# 是否在预约前领取小茅运/耐力（部分账号有助于活跃度）
+claim_energy: true
+
+# 定时：每天在此时间前 N 秒发起预约（申购窗口约 9:00-10:00）
+schedule:
+  target_time: "09:00:00"
+  advance_seconds: 2
+  # 若已过 target_time 是否仍立即执行（试跑 / 手动测试）
+  run_immediately_if_missed: false
+
+# 交互 CLI: python cli.py
+# 试跑: python main.py --dry-run  或  python cli.py dry-run
+# 自检: python check.py  或  python cli.py check
+
+# 场次 sessionId 等待（非 9 点可能为 0，程序会轮询）
+session:
+  wait_seconds: 120
+  poll_interval_seconds: 5
+
+# 失败重试
+retry:
+  count: 3
+  interval_seconds: 0.5
+
+# PushPlus 微信推送 https://www.pushplus.plus
+pushplus_token: ""
