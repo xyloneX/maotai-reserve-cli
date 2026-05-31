@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import com.maotai.reserve.ui.components.LoadingBlock
 import com.maotai.reserve.ui.screens.AccountsScreen
@@ -33,6 +34,7 @@ import com.maotai.reserve.ui.screens.ReserveScreen
 import com.maotai.reserve.ui.components.UpdateCheckHost
 import com.maotai.reserve.ui.theme.MaotaiRed
 import com.maotai.reserve.ui.theme.MaotaiTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +74,7 @@ private fun MainTabs() {
     val session = (androidx.compose.ui.platform.LocalContext.current.applicationContext as MaotaiApp).session
     val baseUrl by session.baseUrlFlow.collectAsState(initial = session.baseUrlBlocking())
     var tab by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     UpdateCheckHost(baseUrl = baseUrl, session = session)
 
@@ -104,6 +107,9 @@ private fun MainTabs() {
             0 -> HomeScreen(
                 onOpenAccounts = { tab = 1 },
                 onOpenLottery = { tab = 3 },
+                onLogout = {
+                    scope.launch { session.logout() }
+                },
                 modifier = Modifier.padding(pad),
             )
             1 -> AccountsScreen(Modifier.padding(pad))

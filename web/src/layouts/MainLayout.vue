@@ -45,7 +45,7 @@
           <el-icon><Trophy /></el-icon>
           <span>中签与付款</span>
         </el-menu-item>
-        <el-menu-item index="settings" :route="{ name: 'settings' }">
+        <el-menu-item v-if="auth.isSuperadmin" index="settings" :route="{ name: 'settings' }">
           <el-icon><Setting /></el-icon>
           <span>系统设置</span>
         </el-menu-item>
@@ -58,7 +58,7 @@
         </el-button>
         <span class="header-title">{{ titleMap[route.name as string] || "" }}</span>
         <div class="header-right">
-          <span class="user">{{ auth.username }}</span>
+          <span class="user">{{ auth.username }}（{{ auth.isSuperadmin ? "管理员" : "操作员" }}）</span>
           <el-button type="danger" link @click="onLogout">退出</el-button>
         </div>
       </el-header>

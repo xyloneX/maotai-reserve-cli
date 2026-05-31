@@ -45,14 +45,24 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showLog" title="任务日志" width="90%" style="max-width: 720px">
-      <pre class="log-box">{{ logText }}</pre>
+    <el-dialog
+      v-model="showLog"
+      title="任务日志（实时）"
+      width="90%"
+      style="max-width: 720px"
+      @closed="stopStream"
+    >
+      <div v-if="streamStatus" class="stream-meta">
+        <el-tag size="small">{{ streamStatus }}</el-tag>
+        <el-progress :percentage="streamProgress" :stroke-width="6" style="flex: 1; max-width: 200px" />
+      </div>
+      <pre ref="logBoxRef" class="log-box">{{ logText }}</pre>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { jobsApi, type JobItem } from "@/api";
 
@@ -62,7 +72,10 @@ const createDry = ref(false);
 const form = ref({ name: "每日申购", waitUntilReserve: false });
 const showLog = ref(false);
 const logText = ref("");
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+const streamStatus = ref("");
+const streamProgress = ref(0);
+const logBoxRef = ref<HTMLElement | null>(null);
+const streamAbort = ref<AbortController | null>(null);
 
 async function load() {
   list.value = await jobsApi.list();
@@ -86,34 +99,69 @@ async function create() {
   await jobsApi.run(job.id);
   ElMessage.success("任务已启动");
   load();
-  startPoll(job.id);
+  viewLog(job);
 }
 
 async function run(row: JobItem) {
   await jobsApi.run(row.id);
   ElMessage.success("已启动");
-  startPoll(row.id);
+  viewLog(row);
 }
 
-function startPoll(id: number) {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    const j = await jobsApi.get(id);
-    load();
-    if (j.status !== "running" && j.status !== "pending") {
-      clearInterval(pollTimer!);
-      pollTimer = null;
-    }
-  }, 2000);
+function scrollLogToBottom() {
+  nextTick(() => {
+    const el = logBoxRef.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+function stopStream() {
+  streamAbort.value?.abort();
+  streamAbort.value = null;
 }
 
 async function viewLog(row: JobItem) {
-  const j = await jobsApi.get(row.id);
-  logText.value = j.log_text || j.log_preview || "暂无日志";
+  stopStream();
+  logText.value = "";
+  streamStatus.value = row.status;
+  streamProgress.value = row.progress;
   showLog.value = true;
+
+  const j = await jobsApi.get(row.id);
+  logText.value = j.log_text || j.log_preview || "";
+  streamStatus.value = j.status;
+  streamProgress.value = j.progress;
+  scrollLogToBottom();
+
+  if (j.status === "running" || j.status === "pending") {
+    startStream(row.id);
+  }
+}
+
+function startStream(jobId: number) {
+  stopStream();
+  const ac = new AbortController();
+  streamAbort.value = ac;
+  jobsApi.streamLogs(
+    jobId,
+    (chunk) => {
+      if (chunk.error) return;
+      streamStatus.value = chunk.status || "";
+      streamProgress.value = chunk.progress ?? 0;
+      if (chunk.delta) {
+        logText.value += chunk.delta;
+      } else if (chunk.log_text) {
+        logText.value = chunk.log_text;
+      }
+      scrollLogToBottom();
+      load();
+    },
+    ac.signal
+  ).catch(() => {});
 }
 
 onMounted(load);
+onUnmounted(stopStream);
 </script>
 
 <style scoped>
@@ -128,6 +176,12 @@ onMounted(load);
   margin-left: 8px;
   font-size: 12px;
   color: #909399;
+}
+.stream-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 .log-box {
   max-height: 400px;

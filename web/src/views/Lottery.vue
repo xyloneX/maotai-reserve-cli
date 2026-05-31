@@ -6,7 +6,8 @@
       <el-button @click="weekend">周末欢乐购</el-button>
       <el-button @click="travel">小茅运旅行</el-button>
       <el-button type="warning" @click="notify">推送待付款</el-button>
-      <el-button @click="exportCsv">导出待付款 CSV</el-button>
+      <el-button @click="exportCsv">导出 CSV</el-button>
+      <el-button type="success" @click="exportExcel">导出 Excel</el-button>
     </div>
 
     <el-alert
@@ -109,6 +110,16 @@ async function travel() {
 async function notify() {
   const r = await paymentsApi.notify();
   ElMessage.success(r.message || "已推送");
+}
+
+async function exportExcel() {
+  const blob = await paymentsApi.exportXlsx();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "pending_payments.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function exportCsv() {

@@ -1,9 +1,9 @@
 package com.maotai.reserve.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,12 +41,16 @@ import com.maotai.reserve.ui.components.StatusChip
 import com.maotai.reserve.ui.theme.MaotaiRed
 import com.maotai.reserve.ui.theme.SuccessGreen
 import com.maotai.reserve.ui.theme.WarningOrange
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
 fun ReserveScreen(modifier: Modifier = Modifier) {
     val session = (androidx.compose.ui.platform.LocalContext.current.applicationContext as MaotaiApp).session
     var jobs by remember { mutableStateOf<List<JobItem>>(emptyList()) }
+    var expandedJobId by remember { mutableIntStateOf(-1) }
+    var expandedLog by remember { mutableStateOf("") }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -61,10 +66,33 @@ fun ReserveScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    fun loadJobDetail(id: Int) {
+        scope.launch {
+            try {
+                val res = session.call { it.jobDetail(id) }
+                res.requireOk()
+                expandedLog = res.data?.logText ?: res.data?.logPreview ?: ""
+            } catch (e: Exception) {
+                msg = session.unwrapApiError(e)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) { load() }
 
+    val hasRunning = jobs.any { it.status == "running" || it.status == "pending" }
+    LaunchedEffect(hasRunning, expandedJobId) {
+        while (isActive && (hasRunning || expandedJobId > 0)) {
+            delay(2000)
+            load()
+            if (expandedJobId > 0) {
+                loadJobDetail(expandedJobId)
+            }
+        }
+    }
+
     Column(modifier.fillMaxSize()) {
-        MaotaiHeroHeader("预约任务", "立即执行或查看历史记录")
+        MaotaiHeroHeader("预约任务", "执行中自动刷新日志")
         Column(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -107,8 +135,14 @@ fun ReserveScreen(modifier: Modifier = Modifier) {
             SectionTitle("任务列表")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(jobs, key = { it.id }) { job ->
+                    val expanded = expandedJobId == job.id
                     Card(
-                        Modifier.fillMaxWidth(),
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expandedJobId = if (expanded) -1 else job.id
+                                if (!expanded) loadJobDetail(job.id)
+                            },
                         shape = RoundedCornerShape(12.dp),
                         elevation = CardDefaults.cardElevation(2.dp),
                     ) {
@@ -117,7 +151,7 @@ fun ReserveScreen(modifier: Modifier = Modifier) {
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(job.name, fontWeight = FontWeight.Medium)
+                                Text("#${job.id} ${job.name}", fontWeight = FontWeight.Medium)
                                 StatusChip(
                                     text = jobStatusLabel(job.status),
                                     color = jobStatusColor(job.status),
@@ -130,10 +164,11 @@ fun ReserveScreen(modifier: Modifier = Modifier) {
                                     color = MaotaiRed,
                                 )
                             }
-                            job.logPreview?.let {
+                            val preview = if (expanded) expandedLog else job.logPreview
+                            preview?.takeIf { it.isNotBlank() }?.let {
                                 Text(
                                     it,
-                                    maxLines = 3,
+                                    maxLines = if (expanded) Int.MAX_VALUE else 3,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

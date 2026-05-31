@@ -46,3 +46,6 @@ def _migrate_sqlite():
     with engine.begin() as conn:
         if "vcode_sent_at" not in cols:
             conn.execute(text("ALTER TABLE accounts ADD COLUMN vcode_sent_at DATETIME"))
+    if "admin_users" not in insp.get_table_names():
+        return
+    # admin_users 由 create_all 创建

@@ -2,6 +2,7 @@ package com.maotai.reserve.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,11 +31,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -49,36 +55,73 @@ import com.maotai.reserve.ui.components.StatusChip
 import com.maotai.reserve.ui.theme.MaotaiRed
 import com.maotai.reserve.ui.theme.SuccessGreen
 import com.maotai.reserve.ui.theme.WarningOrange
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+
+private const val PAGE_SIZE = 50
 
 @Composable
 fun AccountsScreen(modifier: Modifier = Modifier) {
     val session = (androidx.compose.ui.platform.LocalContext.current.applicationContext as MaotaiApp).session
     var list by remember { mutableStateOf<List<AccountItem>>(emptyList()) }
     var total by remember { mutableStateOf(0) }
+    var page by remember { mutableIntStateOf(1) }
+    var loading by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
     var editAcc by remember { mutableStateOf<AccountItem?>(null) }
     var loginAcc by remember { mutableStateOf<AccountItem?>(null) }
     var vcode by remember { mutableStateOf("") }
     var msg by remember { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val hasMore by remember {
+        derivedStateOf { list.size < total }
+    }
 
-    fun load() {
+    fun load(reset: Boolean) {
         scope.launch {
+            if (reset) {
+                loading = true
+                page = 1
+            } else {
+                loadingMore = true
+            }
             try {
-                val q = search.trim().ifEmpty { null }
-                val res = session.call { it.accounts(search = q) }
+                val targetPage = if (reset) 1 else page
+                val q = searchQuery.trim().ifEmpty { null }
+                val res = session.call { it.accounts(page = targetPage, pageSize = PAGE_SIZE, search = q) }
                 res.requireOk()
-                list = res.data?.items ?: emptyList()
-                total = res.data?.total ?: list.size
+                val items = res.data?.items ?: emptyList()
+                total = res.data?.total ?: items.size
+                list = if (reset) items else list + items
+                page = targetPage + 1
             } catch (e: Exception) {
                 msg = session.unwrapApiError(e)
+            } finally {
+                loading = false
+                loadingMore = false
             }
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { load(reset = true) }
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last to info.totalItemsCount
+        }
+            .distinctUntilChanged()
+            .collect { (lastVisible, count) ->
+                if (count > 0 && lastVisible >= count - 5 && hasMore && !loading && !loadingMore) {
+                    load(reset = false)
+                }
+            }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -92,7 +135,7 @@ fun AccountsScreen(modifier: Modifier = Modifier) {
         },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
-            MaotaiHeroHeader("i茅台 账号", "共 $total 个 · 点击卡片编辑")
+            MaotaiHeroHeader("i茅台 账号", "共 $total 个 · 上拉加载更多")
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
@@ -105,50 +148,81 @@ fun AccountsScreen(modifier: Modifier = Modifier) {
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaotaiRed),
                 )
-                TextButton(onClick = { load() }, modifier = Modifier.align(Alignment.End)) {
+                TextButton(
+                    onClick = {
+                        searchQuery = search
+                        load(reset = true)
+                    },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
                     Text("搜索 / 刷新", color = MaotaiRed)
                 }
                 msg?.let { ErrorBanner(message = it, onDismiss = { msg = null }) }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(list, key = { it.id }) { acc ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { editAcc = acc },
-                            shape = RoundedCornerShape(12.dp),
-                            elevation = CardDefaults.cardElevation(2.dp),
-                        ) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(acc.mobile, fontWeight = FontWeight.SemiBold)
-                                    StatusChip(
-                                        text = if (acc.hasToken) "已登录" else "未登录",
-                                        color = if (acc.hasToken) SuccessGreen else WarningOrange,
+                if (loading && list.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaotaiRed)
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(list, key = { it.id }) { acc ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { editAcc = acc },
+                                shape = RoundedCornerShape(12.dp),
+                                elevation = CardDefaults.cardElevation(2.dp),
+                            ) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(acc.mobile, fontWeight = FontWeight.SemiBold)
+                                        StatusChip(
+                                            text = if (acc.hasToken) "已登录" else "未登录",
+                                            color = if (acc.hasToken) SuccessGreen else WarningOrange,
+                                        )
+                                    }
+                                    Text(
+                                        "${acc.province ?: ""} ${acc.city ?: ""} · ${acc.shopStrategy ?: "-"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                try {
+                                                    session.call { it.sendVcode(acc.id) }.requireOk()
+                                                    loginAcc = acc
+                                                    msg = "验证码已发送"
+                                                } catch (e: Exception) {
+                                                    msg = session.unwrapApiError(e)
+                                                }
+                                            }
+                                        }) { Text("发码", color = MaotaiRed) }
+                                        TextButton(onClick = { loginAcc = acc }) { Text("登录", color = MaotaiRed) }
+                                    }
                                 }
+                            }
+                        }
+                        if (loadingMore) {
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = MaotaiRed, modifier = Modifier.height(24.dp))
+                                }
+                            }
+                        } else if (!hasMore && list.isNotEmpty()) {
+                            item {
                                 Text(
-                                    "${acc.province ?: ""} ${acc.city ?: ""} · ${acc.shopStrategy ?: "-"}",
+                                    "已加载全部 $total 个账号",
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(onClick = {
-                                        scope.launch {
-                                            try {
-                                                session.call { it.sendVcode(acc.id) }.requireOk()
-                                                loginAcc = acc
-                                                msg = "验证码已发送"
-                                            } catch (e: Exception) {
-                                                msg = session.unwrapApiError(e)
-                                            }
-                                        }
-                                    }) { Text("发码", color = MaotaiRed) }
-                                    TextButton(onClick = { loginAcc = acc }) { Text("登录", color = MaotaiRed) }
-                                }
                             }
                         }
                     }
@@ -164,7 +238,7 @@ fun AccountsScreen(modifier: Modifier = Modifier) {
                 try {
                     session.call { it.createAccount(body) }.requireOk()
                     showAdd = false
-                    load()
+                    load(reset = true)
                 } catch (e: Exception) {
                     msg = session.unwrapApiError(e)
                 }
@@ -181,7 +255,7 @@ fun AccountsScreen(modifier: Modifier = Modifier) {
                     try {
                         session.call { it.updateAccount(acc.id, body) }.requireOk()
                         editAcc = null
-                        load()
+                        load(reset = true)
                     } catch (e: Exception) {
                         msg = session.unwrapApiError(e)
                     }
@@ -209,7 +283,7 @@ fun AccountsScreen(modifier: Modifier = Modifier) {
                             session.call { it.loginAccount(acc.id, VcodeLoginBody(vcode.trim())) }.requireOk()
                             loginAcc = null
                             vcode = ""
-                            load()
+                            load(reset = true)
                             msg = "登录成功"
                         } catch (e: Exception) {
                             msg = session.unwrapApiError(e)

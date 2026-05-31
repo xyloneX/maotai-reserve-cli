@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -46,9 +47,11 @@ fun LoginScreen() {
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as MaotaiApp
     val session = app.session
     val baseUrl by session.baseUrlFlow.collectAsState(initial = session.baseUrlBlocking())
+    val rememberServer by session.rememberServerFlow.collectAsState(initial = true)
     var serverUrl by remember(baseUrl) { mutableStateOf(baseUrl) }
-    var username by remember { mutableStateOf("admin") }
+    var username by remember { mutableStateOf("owner") }
     var password by remember { mutableStateOf("") }
+    var rememberChecked by remember(rememberServer) { mutableStateOf(rememberServer) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -107,6 +110,11 @@ fun LoginScreen() {
                         visualTransformation = PasswordVisualTransformation(),
                         colors = fieldColors(),
                     )
+                    RowWithCheckbox(
+                        checked = rememberChecked,
+                        onCheckedChange = { rememberChecked = it },
+                        label = "记住服务器地址",
+                    )
                 }
             }
 
@@ -119,7 +127,10 @@ fun LoginScreen() {
                         error = null
                         try {
                             val url = session.normalizeBaseUrl(serverUrl.trim())
-                            session.saveBaseUrl(url)
+                            session.setRememberServer(rememberChecked)
+                            if (rememberChecked) {
+                                session.saveBaseUrl(url)
+                            }
                             val api = session.api(url, null)
                             val res = api.login(LoginRequest(username.trim(), password))
                             res.requireOk()
@@ -157,6 +168,23 @@ fun LoginScreen() {
                 textAlign = TextAlign.Center,
             )
         }
+    }
+}
+
+@Composable
+private fun RowWithCheckbox(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    label: String,
+) {
+    androidx.compose.foundation.layout.Row(
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

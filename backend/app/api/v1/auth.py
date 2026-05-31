@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from ...core.config import settings
+from ...core.database import get_db
 from ...core.response import fail, ok
 from ...core.security import create_access_token
-from ..deps import get_current_user
+from ...services.admin_user_service import authenticate
+from ..deps import AuthUser, CurrentUser, get_current_user
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -15,21 +17,34 @@ class LoginBody(BaseModel):
 
 
 @router.post("/login")
-def login(body: LoginBody):
-    if body.username != settings.admin_username or body.password != settings.admin_password:
-        from fastapi import HTTPException
-
+def login(body: LoginBody, db: Session = Depends(get_db)):
+    user = authenticate(db, body.username.strip(), body.password)
+    if not user:
         raise HTTPException(status_code=401, detail=fail(40100, "用户名或密码错误"))
-    token, expires = create_access_token(body.username)
-    return ok({"access_token": token, "expires_in": expires})
+    token, expires = create_access_token(user.username, user.role)
+    return ok(
+        {
+            "access_token": token,
+            "expires_in": expires,
+            "username": user.username,
+            "role": user.role,
+            "display_name": user.display_name,
+        }
+    )
 
 
 @router.post("/refresh")
-def refresh(user: str = Depends(get_current_user)):
-    token, expires = create_access_token(user)
+def refresh(user: CurrentUser = Depends(get_current_user)):
+    token, expires = create_access_token(user.username, user.role)
     return ok({"access_token": token, "expires_in": expires})
 
 
 @router.get("/me")
-def me(user: str = Depends(get_current_user)):
-    return ok({"username": user})
+def me(user: CurrentUser = Depends(get_current_user)):
+    return ok(
+        {
+            "username": user.username,
+            "role": user.role,
+            "is_superadmin": user.is_superadmin,
+        }
+    )

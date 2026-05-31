@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from ...core.config import settings
 from ...core.response import ok
 from ...services.imaotai_service import health_items
-from ..deps import get_current_user
+from ..deps import AuthUser, CurrentUser, SuperAdmin
 
 router = APIRouter(prefix="/settings", tags=["设置"])
 
@@ -59,12 +59,12 @@ def _settings_view(raw: dict) -> dict:
 
 
 @router.get("")
-def get_settings(_: str = Depends(get_current_user)):
+def get_settings(_: CurrentUser = AuthUser):
     return ok(_settings_view(_load_yaml()))
 
 
 @router.put("")
-def put_settings(body: SettingsUpdate, _: str = Depends(get_current_user)):
+def put_settings(body: SettingsUpdate, _: CurrentUser = SuperAdmin):
     raw = _load_yaml()
     if body.schedule_target_time is not None or body.schedule_advance_seconds is not None:
         raw.setdefault("schedule", {})
@@ -104,7 +104,7 @@ def put_settings(body: SettingsUpdate, _: str = Depends(get_current_user)):
 
 
 @router.get("/proxy-pools")
-def get_proxy_pools(_: str = Depends(get_current_user)):
+def get_proxy_pools(_: CurrentUser = AuthUser):
     from ...services.proxy_service import egress_group_usage, get_proxy_pools
 
     return ok(
@@ -116,7 +116,7 @@ def get_proxy_pools(_: str = Depends(get_current_user)):
 
 
 @router.put("/proxy-pools")
-def put_proxy_pools(body: ProxyPoolsUpdate, _: str = Depends(get_current_user)):
+def put_proxy_pools(body: ProxyPoolsUpdate, _: CurrentUser = SuperAdmin):
     from ...services.proxy_service import set_proxy_pools
 
     pools = set_proxy_pools(body.pools)
@@ -124,14 +124,14 @@ def put_proxy_pools(body: ProxyPoolsUpdate, _: str = Depends(get_current_user)):
 
 
 @router.post("/proxy-pools/sync-from-accounts")
-def sync_proxy_from_accounts(_: str = Depends(get_current_user)):
+def sync_proxy_from_accounts(_: CurrentUser = SuperAdmin):
     from ...services.proxy_service import sync_proxy_keys_from_accounts
 
     return ok(sync_proxy_keys_from_accounts())
 
 
 @router.post("/proxy-pools/test")
-def test_proxy_pools(_: str = Depends(get_current_user)):
+def test_proxy_pools(_: CurrentUser = AuthUser):
     from ...services.proxy_service import test_all_proxies
 
     results = test_all_proxies()
@@ -146,12 +146,12 @@ def test_proxy_pools(_: str = Depends(get_current_user)):
 
 
 @router.get("/health")
-def settings_health(_: str = Depends(get_current_user)):
+def settings_health(_: CurrentUser = AuthUser):
     return ok({"items": health_items()})
 
 
 @router.get("/scheduler")
-def get_scheduler(_: str = Depends(get_current_user)):
+def get_scheduler(_: CurrentUser = AuthUser):
     from ...services.scheduler_service import scheduler_status
 
     return ok(scheduler_status())

@@ -1,11 +1,13 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ...core.database import get_db
+from ...core.database import SessionLocal, get_db
 from ...core.response import fail, ok
 from ...models.entities import Job
 from ...services.job_executor import run_job_async
@@ -75,6 +77,43 @@ def get_job(job_id: int, db: Session = Depends(get_db), _: str = Depends(get_cur
     out = _job_out(job)
     out["log_text"] = job.log_text
     return ok(out)
+
+
+@router.get("/{job_id}/stream")
+async def stream_job_logs(job_id: int, _: str = Depends(get_current_user)):
+    """SSE：任务执行中实时推送日志与进度。"""
+
+    async def event_generator():
+        last_len = 0
+        while True:
+            session = SessionLocal()
+            try:
+                job = session.get(Job, job_id)
+                if not job:
+                    yield f"data: {json.dumps({'error': '任务不存在'}, ensure_ascii=False)}\n\n"
+                    break
+                text = job.log_text or ""
+                payload = {
+                    "id": job.id,
+                    "status": job.status,
+                    "progress": job.progress,
+                    "total": job.total,
+                    "log_text": text,
+                    "delta": text[last_len:] if len(text) > last_len else "",
+                }
+                last_len = len(text)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                if job.status not in ("running", "pending"):
+                    break
+            finally:
+                session.close()
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{job_id}/run")

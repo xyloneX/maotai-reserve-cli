@@ -1,6 +1,7 @@
 package com.maotai.reserve.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -27,12 +28,16 @@ class SessionExpiredException(message: String = "登录已过期，请重新登�
 class SessionManager(private val context: Context) {
     private val keyToken = stringPreferencesKey("token")
     private val keyBaseUrl = stringPreferencesKey("base_url")
+    private val keyRememberServer = booleanPreferencesKey("remember_server")
     private val gson = Gson()
     private val onUnauthorized = AtomicReference<(() -> Unit)?>(null)
 
     val tokenFlow: Flow<String?> = context.dataStore.data.map { it[keyToken] }
     val baseUrlFlow: Flow<String> = context.dataStore.data.map {
         it[keyBaseUrl] ?: BuildConfig.DEFAULT_API_BASE
+    }
+    val rememberServerFlow: Flow<Boolean> = context.dataStore.data.map {
+        it[keyRememberServer] ?: true
     }
 
     fun setOnUnauthorizedListener(listener: (() -> Unit)?) {
@@ -45,6 +50,14 @@ class SessionManager(private val context: Context) {
 
     suspend fun clearToken() {
         context.dataStore.edit { it.remove(keyToken) }
+    }
+
+    suspend fun logout() {
+        clearToken()
+    }
+
+    suspend fun setRememberServer(remember: Boolean) {
+        context.dataStore.edit { it[keyRememberServer] = remember }
     }
 
     suspend fun saveBaseUrl(url: String) {

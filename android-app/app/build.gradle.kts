@@ -11,8 +11,8 @@ android {
         applicationId = "com.maotai.reserve"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
         buildConfigField("String", "DEFAULT_API_BASE", "\"http://139.155.134.97/api/v1/\"")
     }
 
@@ -61,6 +61,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.google.accompanist:accompanist-swiperefresh:0.34.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 24
     admin_username: str = "admin"
     admin_password: str = "admin123"
+    # 双账号：最高管理员（你）+ 甲方操作员
+    owner_username: str = "owner"
+    owner_password: str = ""
+    client_username: str = "client"
+    client_password: str = ""
     database_url: str = f"sqlite:///{ROOT / 'data' / 'admin.db'}"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     config_yaml: Path = ROOT / "config.yaml"

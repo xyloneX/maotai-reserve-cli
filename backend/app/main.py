@@ -82,6 +82,14 @@ def _sync_credentials_to_db():
 async def lifespan(_app: FastAPI):
     init_db()
     _sync_credentials_to_db()
+    from .core.database import SessionLocal
+    from .services.admin_user_service import ensure_default_users
+
+    db = SessionLocal()
+    try:
+        ensure_default_users(db)
+    finally:
+        db.close()
     from .services.scheduler_service import start_scheduler
 
     start_scheduler()

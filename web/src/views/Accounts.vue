@@ -7,10 +7,22 @@
           v-model="search"
           placeholder="搜索手机号/城市/备注"
           clearable
-          style="width: 220px"
+          style="width: 200px"
           @keyup.enter="onSearch"
         />
+        <el-select
+          v-model="egressGroup"
+          placeholder="出口组"
+          clearable
+          filterable
+          style="width: 120px"
+          @change="onSearch"
+        >
+          <el-option v-for="g in egressGroups" :key="g" :label="g" :value="g" />
+        </el-select>
         <el-button @click="onSearch">搜索</el-button>
+        <el-button :disabled="!selectedIds.length" @click="batchEnabled(true)">批量启用</el-button>
+        <el-button :disabled="!selectedIds.length" @click="batchEnabled(false)">批量禁用</el-button>
         <el-upload :show-file-list="false" accept=".csv" :http-request="onImport">
           <el-button>导入 CSV</el-button>
         </el-upload>
@@ -18,7 +30,13 @@
         <el-button type="primary" @click="showCreate = true">新增账号</el-button>
       </div>
     </div>
-    <el-table :data="list" v-loading="loading" stripe>
+    <el-table
+      :data="list"
+      v-loading="loading"
+      stripe
+      @selection-change="onSelectionChange"
+    >
+      <el-table-column type="selection" width="45" />
       <el-table-column prop="mobile" label="手机号" width="130" />
       <el-table-column prop="city" label="城市" width="100" />
       <el-table-column prop="egress_group" label="出口组" width="90" />
@@ -30,7 +48,13 @@
         </template>
       </el-table-column>
       <el-table-column prop="enabled" label="启用" width="70">
-        <template #default="{ row }">{{ row.enabled ? "是" : "否" }}</template>
+        <template #default="{ row }">
+          <el-switch
+            :model-value="row.enabled"
+            size="small"
+            @change="(v: boolean) => toggleOne(row, v)"
+          />
+        </template>
       </el-table-column>
       <el-table-column label="操作" min-width="280" fixed="right">
         <template #default="{ row }">
@@ -89,9 +113,12 @@ const current = ref<AccountItem | null>(null);
 const vcode = ref("");
 const loginLoading = ref(false);
 const search = ref("");
+const egressGroup = ref("");
+const egressGroups = ref<string[]>([]);
 const page = ref(1);
 const pageSize = ref(50);
 const total = ref(0);
+const selectedIds = ref<number[]>([]);
 const form = reactive({
   mobile: "",
   province: "",
@@ -99,10 +126,19 @@ const form = reactive({
   egress_group: "",
 });
 
+async function loadEgressGroups() {
+  egressGroups.value = await accountsApi.egressGroups();
+}
+
 async function load() {
   loading.value = true;
   try {
-    const res = await accountsApi.list(page.value, pageSize.value, search.value || undefined);
+    const res = await accountsApi.list(
+      page.value,
+      pageSize.value,
+      search.value || undefined,
+      egressGroup.value || undefined
+    );
     list.value = res.items;
     total.value = res.total;
   } finally {
@@ -115,11 +151,33 @@ function onSearch() {
   load();
 }
 
+function onSelectionChange(rows: AccountItem[]) {
+  selectedIds.value = rows.map((r) => r.id!).filter(Boolean);
+}
+
+async function batchEnabled(enabled: boolean) {
+  const label = enabled ? "启用" : "禁用";
+  await ElMessageBox.confirm(`确定${label}选中的 ${selectedIds.value.length} 个账号？`, "提示");
+  const r = await accountsApi.batchEnabled({
+    account_ids: selectedIds.value,
+    enabled,
+  });
+  ElMessage.success(`已${label} ${r.updated} 个账号`);
+  load();
+}
+
+async function toggleOne(row: AccountItem, enabled: boolean) {
+  if (!row.id) return;
+  await accountsApi.batchEnabled({ account_ids: [row.id], enabled });
+  row.enabled = enabled;
+}
+
 async function onImport(opt: UploadRequestOptions) {
   const file = opt.file as File;
   try {
     const r = await accountsApi.importCsv(file);
     ElMessage.success(`导入完成：新增 ${r.created}，更新 ${r.updated}`);
+    loadEgressGroups();
     load();
   } catch (e) {
     ElMessage.error(String(e));
@@ -135,6 +193,7 @@ async function create() {
   await accountsApi.create(form);
   ElMessage.success("已创建");
   showCreate.value = false;
+  loadEgressGroups();
   load();
 }
 
@@ -174,7 +233,10 @@ async function remove(row: AccountItem) {
   load();
 }
 
-onMounted(load);
+onMounted(async () => {
+  await loadEgressGroups();
+  load();
+});
 </script>
 
 <style scoped>

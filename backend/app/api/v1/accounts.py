@@ -93,18 +93,26 @@ def _acc_out(a: Account) -> dict:
     }
 
 
-@router.get("")
-def list_accounts(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=1000),
-    search: str | None = Query(None, description="手机号/城市/备注模糊搜索"),
-    enabled_only: bool = Query(False),
-    db: Session = Depends(get_db),
-    _: str = Depends(get_current_user),
+class BatchEnabledBody(BaseModel):
+    account_ids: list[int] = Field(default_factory=list)
+    enabled: bool = True
+    select_all_filtered: bool = False
+    search: str | None = None
+    egress_group: str | None = None
+
+
+def _accounts_query(
+    db: Session,
+    *,
+    search: str | None = None,
+    enabled_only: bool = False,
+    egress_group: str | None = None,
 ):
     q = db.query(Account).order_by(Account.id.desc())
     if enabled_only:
         q = q.filter(Account.enabled == True)  # noqa: E712
+    if egress_group is not None and egress_group.strip():
+        q = q.filter(Account.egress_group == egress_group.strip())
     if search:
         kw = f"%{search.strip()}%"
         q = q.filter(
@@ -113,9 +121,59 @@ def list_accounts(
             | (Account.remark.like(kw))
             | (Account.egress_group.like(kw))
         )
+    return q
+
+
+@router.get("")
+def list_accounts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=1000),
+    search: str | None = Query(None, description="手机号/城市/备注模糊搜索"),
+    enabled_only: bool = Query(False),
+    egress_group: str | None = Query(None, description="按出口组精确筛选"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_user),
+):
+    q = _accounts_query(db, search=search, enabled_only=enabled_only, egress_group=egress_group)
     total = q.count()
     items = q.offset((page - 1) * page_size).limit(page_size).all()
     return ok({"total": total, "items": [_acc_out(a) for a in items]})
+
+
+@router.get("/egress-groups")
+def list_egress_groups(db: Session = Depends(get_db), _: str = Depends(get_current_user)):
+    rows = (
+        db.query(Account.egress_group)
+        .filter(Account.egress_group.isnot(None), Account.egress_group != "")
+        .distinct()
+        .order_by(Account.egress_group)
+        .all()
+    )
+    groups = [r[0] for r in rows]
+    return ok({"groups": groups})
+
+
+@router.post("/batch-enabled")
+def batch_set_enabled(
+    body: BatchEnabledBody,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_user),
+):
+    if body.select_all_filtered:
+        q = _accounts_query(db, search=body.search, egress_group=body.egress_group)
+        accounts = q.all()
+    else:
+        if not body.account_ids:
+            raise HTTPException(status_code=400, detail=fail(40001, "请选择账号"))
+        accounts = db.query(Account).filter(Account.id.in_(body.account_ids)).all()
+    for acc in accounts:
+        acc.enabled = body.enabled
+    db.commit()
+    from ...services.credential_sync import sync_db_to_credentials_file
+
+    sync_db_to_credentials_file(db, require_token=False)
+    action = "启用" if body.enabled else "禁用"
+    return ok({"updated": len(accounts)}, f"已{action} {len(accounts)} 个账号")
 
 
 @router.post("/import-csv")

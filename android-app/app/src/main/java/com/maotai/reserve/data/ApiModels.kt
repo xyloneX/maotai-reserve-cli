@@ -127,6 +127,7 @@ data class JobDetailData(
     val status: String,
     val progress: Int,
     @SerializedName("log_text") val logText: String?,
+    @SerializedName("log_preview") val logPreview: String?,
 )
 
 data class LotteryItem(

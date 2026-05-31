@@ -59,7 +59,8 @@ def main() -> int:
         print("请设置 DEPLOY_HOST 与 DEPLOY_PASS", file=sys.stderr)
         return 1
 
-    admin_pass = os.environ.get("MT_ADMIN_PASSWORD") or f"Maotai@{secrets.token_hex(4)}"
+    owner_pass = os.environ.get("MT_OWNER_PASSWORD") or os.environ.get("MT_ADMIN_PASSWORD") or f"Maotai@Owner{secrets.token_hex(3)}"
+    client_pass = os.environ.get("MT_CLIENT_PASSWORD") or f"Maotai@Client{secrets.token_hex(3)}"
     secret_key = os.environ.get("MT_SECRET_KEY") or secrets.token_urlsafe(32)
     preserve_env = os.environ.get("DEPLOY_PRESERVE_ENV", "1") != "0"
 
@@ -170,8 +171,12 @@ echo OK
     print("==> 安装（约 5～15 分钟，含 npm build）")
     run_script(remote_setup, sudo=True, timeout=1200)
 
-    env_content = f"""MT_ADMIN_USERNAME=admin
-MT_ADMIN_PASSWORD={admin_pass}
+    env_content = f"""MT_OWNER_USERNAME=owner
+MT_OWNER_PASSWORD={owner_pass}
+MT_CLIENT_USERNAME=client
+MT_CLIENT_PASSWORD={client_pass}
+MT_ADMIN_USERNAME=owner
+MT_ADMIN_PASSWORD={owner_pass}
 MT_SECRET_KEY={secret_key}
 MT_CORS_ORIGINS=http://{host}
 MT_APP_ROOT={REMOTE_DIR}
@@ -203,10 +208,22 @@ MT_APP_DOWNLOAD_URL=http://{host}/downloads/maotai-reserve.apk
     local_env.unlink(missing_ok=True)
 
     run_cmd("systemctl restart maotai-api", sudo=True)
-    status = run_cmd(
-        "systemctl is-active maotai-api && curl -s http://127.0.0.1:8000/api/v1/ping",
-        sudo=False,
-    )
+    import time
+
+    status = ""
+    for _ in range(8):
+        time.sleep(2)
+        try:
+            status = run_cmd(
+                "systemctl is-active maotai-api && curl -sf http://127.0.0.1:8000/api/v1/ping",
+                sudo=False,
+            )
+            if "ok" in status or "up" in status:
+                break
+        except RuntimeError:
+            continue
+    if not status:
+        status = run_cmd("systemctl is-active maotai-api", sudo=False)
 
     sftp.close()
     client.close()
@@ -214,8 +231,9 @@ MT_APP_DOWNLOAD_URL=http://{host}/downloads/maotai-reserve.apk
 
     print(status.strip())
     print(f"\n✅ 部署完成: http://{host}/")
-    print(f"   管理员: admin / {admin_pass}")
-    print("   请尽快修改服务器 SSH 密码与管理员密码")
+    print(f"   最高管理员 owner / {owner_pass}")
+    print(f"   甲方操作员 client / {client_pass}")
+    print("   请尽快修改 SSH 密码，并将甲方密码单独交付")
     return 0
 
 

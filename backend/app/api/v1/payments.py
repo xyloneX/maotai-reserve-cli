@@ -1,9 +1,11 @@
 """统一付款管理：待付款汇总、标记已付、导出、提醒。"""
 
 from datetime import datetime, timezone
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
 from ...core.database import get_db
@@ -78,6 +80,40 @@ def export_pending(db: Session = Depends(get_db), _: str = Depends(get_current_u
         )
     body = "\n".join(lines) + "\n"
     return PlainTextResponse(body, media_type="text/csv; charset=utf-8")
+
+
+@router.get("/export-xlsx")
+def export_pending_xlsx(db: Session = Depends(get_db), _: str = Depends(get_current_user)):
+    rows = (
+        db.query(LotteryResult)
+        .filter(LotteryResult.status == "won", LotteryResult.payment_status == "pending")
+        .order_by(LotteryResult.id.desc())
+        .all()
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "待付款"
+    ws.append(["手机号", "商品", "场次", "订单号", "付款截止", "付款状态", "说明"])
+    for r in rows:
+        ws.append(
+            [
+                r.mobile,
+                r.item_name or "",
+                r.session_name or "",
+                r.order_id or "",
+                r.pay_deadline or "",
+                "待付款",
+                "请在 i茅台 App 内 24 小时内支付",
+            ]
+        )
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="pending_payments.xlsx"'},
+    )
 
 
 @router.post("/notify")

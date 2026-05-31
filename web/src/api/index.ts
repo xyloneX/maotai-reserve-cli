@@ -6,7 +6,7 @@ export const authApi = {
       username,
       password,
     }),
-  me: () => apiGet<{ username: string }>("/auth/me"),
+  me: () => apiGet<{ username: string; role: string; is_superadmin: boolean }>("/auth/me"),
 };
 
 export const settingsApi = {
@@ -39,12 +39,22 @@ export interface ProxyTestItem {
 }
 
 export const accountsApi = {
-  list: (page = 1, page_size = 20, search?: string) =>
+  list: (page = 1, page_size = 20, search?: string, egress_group?: string) =>
     apiGet<{ total: number; items: AccountItem[] }>("/accounts", {
       page,
       page_size,
       ...(search ? { search } : {}),
+      ...(egress_group ? { egress_group } : {}),
     }),
+  egressGroups: () =>
+    apiGet<{ groups: string[] }>("/accounts/egress-groups").then((r) => r.groups ?? []),
+  batchEnabled: (body: {
+    account_ids: number[];
+    enabled: boolean;
+    select_all_filtered?: boolean;
+    search?: string;
+    egress_group?: string;
+  }) => apiPost<{ updated: number }>("/accounts/batch-enabled", body),
   importCsv: async (file: File) => {
     const { apiBase } = await import("./http");
     const token = localStorage.getItem("mt_admin_token");
@@ -139,6 +149,38 @@ export const jobsApi = {
   run: (id: number) => apiPost<{ message: string }>(`/jobs/${id}/run`),
   cancel: (id: number) => apiPost(`/jobs/${id}/cancel`),
   dryRun: (body: JobCreate) => apiPost<JobItem>("/jobs/dry-run", body),
+  streamLogs: async (
+    id: number,
+    onChunk: (data: JobStreamChunk) => void,
+    signal?: AbortSignal
+  ) => {
+    const { apiBase } = await import("./http");
+    const token = localStorage.getItem("mt_admin_token");
+    const res = await fetch(`${apiBase}/jobs/${id}/stream`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error("日志流连接失败");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const line = part.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        try {
+          onChunk(JSON.parse(line.slice(6)) as JobStreamChunk);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  },
 };
 
 export const recordsApi = {
@@ -169,6 +211,15 @@ export const paymentsApi = {
     const res = await fetch(`${apiBase}/payments/export`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+    return res.blob();
+  },
+  exportXlsx: async () => {
+    const { apiBase } = await import("./http");
+    const token = localStorage.getItem("mt_admin_token");
+    const res = await fetch(`${apiBase}/payments/export-xlsx`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("导出失败");
     return res.blob();
   },
 };
@@ -242,6 +293,16 @@ export interface ShopRankItem {
   name: string;
   inventory: number;
   city?: string;
+}
+
+export interface JobStreamChunk {
+  id?: number;
+  status?: string;
+  progress?: number;
+  total?: number;
+  log_text?: string;
+  delta?: string;
+  error?: string;
 }
 
 export interface JobItem {
