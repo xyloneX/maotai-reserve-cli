@@ -17,7 +17,26 @@ export const settingsApi = {
     apiGet<{ enabled: boolean; running: boolean; jobs: { id: string; next_run: string | null }[] }>(
       "/settings/scheduler"
     ),
+  proxyPools: () =>
+    apiGet<{
+      pools: Record<string, string>;
+      usage: { egress_group: string; account_count: number; has_proxy: boolean }[];
+    }>("/settings/proxy-pools"),
+  putProxyPools: (pools: Record<string, string>) =>
+    apiPut<{ pools: Record<string, string>; count: number }>("/settings/proxy-pools", { pools }),
+  syncProxyFromAccounts: () =>
+    apiPost<{ added: number; total: number }>("/settings/proxy-pools/sync-from-accounts"),
+  testProxies: () =>
+    apiPost<{ total: number; ok_count: number; items: ProxyTestItem[] }>("/settings/proxy-pools/test"),
 };
+
+export interface ProxyTestItem {
+  name: string;
+  url: string;
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+}
 
 export const accountsApi = {
   list: (page = 1, page_size = 20, search?: string) =>
@@ -49,6 +68,48 @@ export const accountsApi = {
     apiPost<{ user_id: string; token_valid: boolean }>(`/accounts/${id}/login`, { vcode }),
   validate: (id: number) => apiPost<{ valid: boolean; message: string }>(`/accounts/${id}/validate-token`),
   status: (id: number) => apiGet<AccountStatus>(`/accounts/${id}/status`),
+};
+
+export const batchLoginApi = {
+  stats: () =>
+    apiGet<BatchLoginStats>("/accounts/batch/stats"),
+  unlogged: (page = 1, page_size = 50, vcode_sent_only = false) =>
+    apiGet<{ total: number; items: UnloggedAccount[] }>("/accounts/batch/unlogged", {
+      page,
+      page_size,
+      vcode_sent_only,
+    }),
+  exportUnlogged: async (vcode_sent_only = false) => {
+    const { apiBase } = await import("./http");
+    const token = localStorage.getItem("mt_admin_token");
+    const res = await fetch(
+      `${apiBase}/accounts/batch/unlogged/export?vcode_sent_only=${vcode_sent_only}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+    );
+    return res.blob();
+  },
+  sendVcode: (body?: { account_ids?: number[]; all_unlogged?: boolean; interval_seconds?: number }) =>
+    apiPost<{ job_id: number; total: number; message: string }>("/accounts/batch/send-vcode", {
+      all_unlogged: true,
+      ...body,
+    }),
+  loginCsv: async (file: File) => {
+    const { apiBase } = await import("./http");
+    const token = localStorage.getItem("mt_admin_token");
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${apiBase}/accounts/batch/login-csv`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    });
+    const json = await res.json();
+    if (json.code !== 0) throw new Error(json.message || "导入失败");
+    return json.data as { job_id: number; total: number };
+  },
+  login: (pairs: { account_id?: number; mobile?: string; vcode: string }[]) =>
+    apiPost<{ job_id: number; total: number }>("/accounts/batch/login", { pairs }),
+  cancel: (jobId: number) => apiPost(`/accounts/batch/cancel/${jobId}`),
 };
 
 export const productsApi = {
@@ -145,6 +206,27 @@ export interface AccountStatus {
   token_valid: boolean;
   message: string;
   last_error?: string;
+}
+
+export interface BatchLoginStats {
+  total: number;
+  enabled: number;
+  logged_in: number;
+  unlogged: number;
+  vcode_sent_pending_login: number;
+  batch_running: boolean;
+}
+
+export interface UnloggedAccount {
+  id: number;
+  mobile: string;
+  mobile_raw: string;
+  city?: string;
+  egress_group?: string;
+  enabled?: boolean;
+  vcode_sent_at?: string | null;
+  last_error?: string;
+  remark?: string;
 }
 
 export interface ProductItem {

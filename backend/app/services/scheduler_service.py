@@ -37,17 +37,55 @@ def _reserve_start_time() -> tuple[int, int]:
 
 
 def _job_daily_reserve() -> None:
+    import time
+
+    from ..core.database import SessionLocal
+    from ..models.entities import Account
     from .reserve_service import is_scheduled_reserve_running, run_reserve_in_background
 
     if is_scheduled_reserve_running():
         logger.warning("已有预约任务在运行，跳过本次定时")
         return
-    logger.info("定时任务：每日申购预约开始")
-    run_reserve_in_background(
-        dry_run=False,
-        skip_wait=False,
-        job_name="定时每日预约",
-    )
+
+    cfg = get_app_config()
+    shard_size = max(0, cfg.reserve_shard_size)
+    db = SessionLocal()
+    try:
+        ids = [
+            a.id
+            for a in db.query(Account)
+            .filter(Account.enabled == True, Account.token_enc != "")  # noqa: E712
+            .order_by(Account.id)
+            .all()
+        ]
+    finally:
+        db.close()
+
+    if not ids:
+        logger.warning("定时预约：无已登录启用账号")
+        return
+
+    if shard_size > 0 and len(ids) > shard_size:
+        logger.info("定时预约分片：%d 个账号，每片 %d", len(ids), shard_size)
+        for i in range(0, len(ids), shard_size):
+            chunk = ids[i : i + shard_size]
+            n = i // shard_size + 1
+            run_reserve_in_background(
+                dry_run=False,
+                skip_wait=False,
+                account_ids=chunk,
+                job_name=f"定时预约分片{n}",
+            )
+            if i + shard_size < len(ids):
+                time.sleep(3)
+    else:
+        logger.info("定时任务：每日申购预约开始（%d 账号）", len(ids))
+        run_reserve_in_background(
+            dry_run=False,
+            skip_wait=False,
+            account_ids=ids,
+            job_name="定时每日预约",
+        )
 
 
 def _job_lottery_sync() -> None:

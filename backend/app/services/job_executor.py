@@ -26,6 +26,22 @@ def _skip_wait_for_job(job: Job) -> bool:
 
 
 def run_job_async(job_id: int) -> None:
+    db = SessionLocal()
+    try:
+        job = db.get(Job, job_id)
+        jtype = job.job_type if job else ""
+    finally:
+        db.close()
+    if jtype == "batch_vcode":
+        from .batch_login_service import run_batch_vcode_async
+
+        run_batch_vcode_async(job_id)
+        return
+    if jtype == "batch_login":
+        from .batch_login_service import run_batch_login_async
+
+        run_batch_login_async(job_id)
+        return
     with _lock:
         if job_id in _running:
             return

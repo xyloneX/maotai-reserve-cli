@@ -19,6 +19,13 @@ class SettingsUpdate(BaseModel):
     retry_interval_seconds: float | None = None
     session_wait_seconds: int | None = None
     pushplus_token: str | None = None
+    reserve_parallel_by_egress: bool | None = None
+    reserve_max_workers: int | None = None
+    reserve_shard_size: int | None = None
+
+
+class ProxyPoolsUpdate(BaseModel):
+    pools: dict[str, str]
 
 
 def _load_yaml() -> dict:
@@ -32,6 +39,8 @@ def _settings_view(raw: dict) -> dict:
     sched = raw.get("schedule", {}) or {}
     retry = raw.get("retry", {}) or {}
     session = raw.get("session", {}) or {}
+    reserve = raw.get("reserve", {}) or {}
+    pools = raw.get("proxy_pools") or {}
     return {
         "schedule_target_time": sched.get("target_time", "09:00:00"),
         "schedule_advance_seconds": sched.get("advance_seconds", 2),
@@ -42,6 +51,10 @@ def _settings_view(raw: dict) -> dict:
         "session_wait_seconds": session.get("wait_seconds", 120),
         "pushplus_token": "***" if raw.get("pushplus_token") else "",
         "amap_key": "***" if raw.get("amap_key") else "",
+        "reserve_parallel_by_egress": reserve.get("parallel_by_egress", True),
+        "reserve_max_workers": reserve.get("max_workers", 32),
+        "reserve_shard_size": reserve.get("shard_size", 50),
+        "proxy_pool_count": len(pools),
     }
 
 
@@ -73,9 +86,63 @@ def put_settings(body: SettingsUpdate, _: str = Depends(get_current_user)):
         raw.setdefault("session", {})["wait_seconds"] = body.session_wait_seconds
     if body.pushplus_token is not None:
         raw["pushplus_token"] = body.pushplus_token
+    if (
+        body.reserve_parallel_by_egress is not None
+        or body.reserve_max_workers is not None
+        or body.reserve_shard_size is not None
+    ):
+        raw.setdefault("reserve", {})
+        if body.reserve_parallel_by_egress is not None:
+            raw["reserve"]["parallel_by_egress"] = body.reserve_parallel_by_egress
+        if body.reserve_max_workers is not None:
+            raw["reserve"]["max_workers"] = body.reserve_max_workers
+        if body.reserve_shard_size is not None:
+            raw["reserve"]["shard_size"] = body.reserve_shard_size
     with open(settings.config_yaml, "w", encoding="utf-8") as f:
         yaml.dump(raw, f, allow_unicode=True, default_flow_style=False)
     return ok(_settings_view(raw))
+
+
+@router.get("/proxy-pools")
+def get_proxy_pools(_: str = Depends(get_current_user)):
+    from ...services.proxy_service import egress_group_usage, get_proxy_pools
+
+    return ok(
+        {
+            "pools": get_proxy_pools(),
+            "usage": egress_group_usage(),
+        }
+    )
+
+
+@router.put("/proxy-pools")
+def put_proxy_pools(body: ProxyPoolsUpdate, _: str = Depends(get_current_user)):
+    from ...services.proxy_service import set_proxy_pools
+
+    pools = set_proxy_pools(body.pools)
+    return ok({"pools": pools, "count": len(pools)})
+
+
+@router.post("/proxy-pools/sync-from-accounts")
+def sync_proxy_from_accounts(_: str = Depends(get_current_user)):
+    from ...services.proxy_service import sync_proxy_keys_from_accounts
+
+    return ok(sync_proxy_keys_from_accounts())
+
+
+@router.post("/proxy-pools/test")
+def test_proxy_pools(_: str = Depends(get_current_user)):
+    from ...services.proxy_service import test_all_proxies
+
+    results = test_all_proxies()
+    ok_count = sum(1 for r in results if r.get("ok"))
+    return ok(
+        {
+            "total": len(results),
+            "ok_count": ok_count,
+            "items": results,
+        }
+    )
 
 
 @router.get("/health")

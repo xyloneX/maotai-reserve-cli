@@ -23,6 +23,18 @@
     </el-row>
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :span="24">
+        <el-card header="账号登录进度">
+          <p v-if="loginStats">
+            已登录 {{ loginStats.logged_in }} / {{ loginStats.total }}，待登录
+            <strong>{{ loginStats.unlogged }}</strong>
+            （已发码待填 {{ loginStats.vcode_sent_pending_login }}）
+          </p>
+          <router-link to="/batch-login">前往批量登录 →</router-link>
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-row :gutter="16" style="margin-top: 16px">
+      <el-col :span="24">
         <el-card header="服务器定时任务">
           <template v-if="scheduler?.running">
             <p v-for="j in scheduler.jobs" :key="j.id" class="sched-line">
@@ -54,10 +66,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { jobsApi, recordsApi, settingsApi, type JobItem, type StatsData } from "@/api";
+import { jobsApi, recordsApi, settingsApi, batchLoginApi, type BatchLoginStats, type JobItem, type StatsData } from "@/api";
 
 const stats = ref<StatsData | null>(null);
 const jobs = ref<JobItem[]>([]);
+const loginStats = ref<BatchLoginStats | null>(null);
 const scheduler = ref<{ running: boolean; jobs: { id: string; next_run: string | null }[] } | null>(
   null
 );
@@ -70,6 +83,11 @@ const rateText = computed(() => {
 onMounted(async () => {
   stats.value = await recordsApi.stats();
   jobs.value = (await jobsApi.list()).slice(0, 5);
+  try {
+    loginStats.value = await batchLoginApi.stats();
+  } catch {
+    loginStats.value = null;
+  }
   try {
     scheduler.value = await settingsApi.scheduler();
   } catch {

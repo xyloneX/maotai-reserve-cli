@@ -44,6 +44,14 @@ proxy_pools: {}
 # 分配脚本建议每组人数: python scripts/assign_egress_groups.py --per-group 20
 max_accounts_per_egress: 20
 
+# ---------- 大规模预约（几百～1000 号）----------
+# 按 egress_group 并行：不同出口组同时跑，组内仍串行（同代理不打满）
+reserve:
+  parallel_by_egress: true
+  max_workers: 32
+  # 定时预约账号数超过此值时拆成多个子任务，错开 3 秒启动
+  shard_size: 50
+
 # 是否在预约前领取小茅运/耐力（账号活跃度，需 App 内配合签到）
 claim_energy: true
 

@@ -24,7 +24,11 @@ web/         Vue3 + Element Plus（端口 5173）
 
 ## 批量导入账号
 
-Web **账号管理** 页支持上传 CSV，示例见 `docs/accounts-import.example.csv`。导入后请在页面逐号 **发码 → 登录** 获取 Token。
+Web **账号管理** 页支持上传 CSV，示例见 `docs/accounts-import.example.csv`。导入后请逐号登录，或使用 **批量登录** 页：
+
+1. **批量发码**：对全部未登录账号按间隔（默认 90 秒）自动排队发验证码  
+2. 各手机收到短信后，在页面填写验证码，或导出 CSV 填好 `mobile,vcode` 后 **导入 CSV 批量登录**  
+3. 登录 CSV 示例：`docs/accounts-login.example.csv`
 
 ## 启动步骤
 

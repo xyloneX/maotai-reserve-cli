@@ -21,6 +21,10 @@
           <el-icon><User /></el-icon>
           <span>账号管理</span>
         </el-menu-item>
+        <el-menu-item index="batch-login" :route="{ name: 'batch-login' }">
+          <el-icon><Iphone /></el-icon>
+          <span>批量登录</span>
+        </el-menu-item>
         <el-menu-item index="products" :route="{ name: 'products' }">
           <el-icon><Goods /></el-icon>
           <span>商品管理</span>
@@ -78,6 +82,7 @@ const collapsed = ref(false);
 const titleMap: Record<string, string> = {
   dashboard: "仪表盘",
   accounts: "账号管理",
+  "batch-login": "批量登录",
   products: "商品管理",
   shops: "门店排行",
   jobs: "任务中心",

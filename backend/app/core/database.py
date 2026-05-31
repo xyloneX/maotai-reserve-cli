@@ -30,3 +30,19 @@ def init_db():
     from .. import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_sqlite()
+
+
+def _migrate_sqlite():
+    """SQLite 轻量补列（无 Alembic 时）。"""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "accounts" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("accounts")}
+    with engine.begin() as conn:
+        if "vcode_sent_at" not in cols:
+            conn.execute(text("ALTER TABLE accounts ADD COLUMN vcode_sent_at DATETIME"))

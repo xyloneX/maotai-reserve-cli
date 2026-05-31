@@ -177,6 +177,38 @@ def health_items() -> list[dict]:
         items.append(
             {"level": "warn", "category": "scheduler", "message": "定时任务已关闭"}
         )
+    try:
+        from .proxy_service import get_proxy_pools, test_all_proxies
+
+        pools = get_proxy_pools()
+        if pools:
+            items.append(
+                {
+                    "level": "ok",
+                    "category": "proxy",
+                    "message": f"已配置 {len(pools)} 个代理出口",
+                }
+            )
+            tested = test_all_proxies(max_workers=4)
+            bad = [t for t in tested if not t.get("ok")]
+            if bad:
+                items.append(
+                    {
+                        "level": "warn",
+                        "category": "proxy",
+                        "message": f"{len(bad)} 个代理不可用: {', '.join(t['name'] for t in bad[:5])}",
+                    }
+                )
+        else:
+            items.append(
+                {
+                    "level": "warn",
+                    "category": "proxy",
+                    "message": "未配置 proxy_pools，多账号同 IP 风险高",
+                }
+            )
+    except Exception as e:
+        items.append({"level": "warn", "category": "proxy", "message": str(e)[:120]})
     return items
 
 

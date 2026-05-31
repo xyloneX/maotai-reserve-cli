@@ -33,6 +33,7 @@ class Account(Base):
     end_date: Mapped[str] = mapped_column(String(8), default="99991231")
     remark: Mapped[str] = mapped_column(String(256), default="")
     last_error: Mapped[str] = mapped_column(String(512), default="")
+    vcode_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_reserved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     logged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

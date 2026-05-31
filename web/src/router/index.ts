@@ -16,6 +16,7 @@ const router = createRouter({
       children: [
         { path: "", name: "dashboard", component: () => import("@/views/Dashboard.vue") },
         { path: "accounts", name: "accounts", component: () => import("@/views/Accounts.vue") },
+        { path: "batch-login", name: "batch-login", component: () => import("@/views/BatchLogin.vue") },
         { path: "products", name: "products", component: () => import("@/views/Products.vue") },
         { path: "shops", name: "shops", component: () => import("@/views/Shops.vue") },
         { path: "jobs", name: "jobs", component: () => import("@/views/Jobs.vue") },

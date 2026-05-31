@@ -89,6 +89,7 @@ def _acc_out(a: Account) -> dict:
         "last_reserved_at": a.last_reserved_at.isoformat() if a.last_reserved_at else None,
         "last_error": a.last_error,
         "has_token": bool(a.token_enc),
+        "vcode_sent_at": a.vcode_sent_at.isoformat() if a.vcode_sent_at else None,
     }
 
 
@@ -271,6 +272,8 @@ def api_send_vcode(account_id: int, db: Session = Depends(get_db), _: str = Depe
         raise HTTPException(status_code=429, detail=fail(40029, str(e)))
     if not ok_flag:
         raise HTTPException(status_code=400, detail=fail(50001, msg))
+    acc.vcode_sent_at = datetime.now(timezone.utc)
+    db.commit()
     return ok({"message": msg})
 
 

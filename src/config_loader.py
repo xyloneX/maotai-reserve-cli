@@ -76,6 +76,9 @@ class AppConfig:
     proxy_pools: dict[str, str]
     max_accounts_per_egress: int
     egress_group_stagger_seconds: float
+    reserve_parallel_by_egress: bool
+    reserve_max_workers: int
+    reserve_shard_size: int
     antidetect: AntidetectConfig
 
 
@@ -166,6 +169,11 @@ def load_config() -> AppConfig:
         proxy_pools={str(k): str(v) for k, v in (raw.get("proxy_pools") or {}).items()},
         max_accounts_per_egress=int(raw.get("max_accounts_per_egress", 0)),
         egress_group_stagger_seconds=float(raw.get("egress_group_stagger_seconds", 2)),
+        reserve_parallel_by_egress=bool(
+            (raw.get("reserve") or {}).get("parallel_by_egress", True)
+        ),
+        reserve_max_workers=int((raw.get("reserve") or {}).get("max_workers", 32)),
+        reserve_shard_size=int((raw.get("reserve") or {}).get("shard_size", 50)),
         antidetect=AntidetectConfig(
             enabled=bool(ad.get("enabled", True)),
             stable_fingerprint=bool(ad.get("stable_fingerprint", True)),

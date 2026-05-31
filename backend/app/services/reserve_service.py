@@ -95,11 +95,13 @@ def _execute(
         db.commit()
 
         lines: list[str] = []
+        log_lock = threading.Lock()
 
         def on_line(line: str) -> None:
             lines.append(line)
-            job.log_text = "\n".join(lines[-300:])
-            db.commit()
+            with log_lock:
+                job.log_text = "\n".join(lines[-300:])
+                db.commit()
 
         from src.config_loader import ConfigError
         from src.runner import execute_reserve

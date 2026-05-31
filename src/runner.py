@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -278,6 +281,104 @@ def run_account(
     return results
 
 
+def _egress_key(acc: AccountCredentials) -> str:
+    g = (acc.egress_group or "").strip()
+    return g if g else "_direct"
+
+
+def _run_pass_tasks(
+    cfg: AppConfig,
+    app_ver: str,
+    dry_run: bool,
+    work: list[ItemAttempt],
+    on_line: callable | None,
+    *,
+    group_label: str = "",
+) -> tuple[list[str], list[ItemAttempt]]:
+    """单出口组内串行执行（同组共享代理，避免打满）。"""
+    all_lines: list[str] = []
+    failed: list[ItemAttempt] = []
+    prev_group: str | None = None
+    prev_mobile: str | None = None
+
+    for idx, task in enumerate(work):
+        acc = task.account
+        group = (acc.egress_group or "").strip()
+        new_account = acc.mobile != prev_mobile
+        if idx > 0 and not dry_run and new_account:
+            _account_gap(
+                cfg,
+                idx,
+                dry_run,
+                prev_group=prev_group or "",
+                curr_group=group,
+            )
+        prev_group = group
+        prev_mobile = acc.mobile
+
+        if TODAY > acc.end_date:
+            continue
+
+        client = IMaotaiClient(
+            acc,
+            app_version=app_ver,
+            proxy_pools=cfg.proxy_pools,
+            antidetect=cfg.antidetect,
+        )
+        try:
+            if not dry_run:
+                client.warmup()
+            prepare_account(client, cfg, dry_run)
+            p_c_map, shop_details = client.fetch_shop_map()
+            if _should_claim_energy(cfg) and not dry_run:
+                logger.info("小茅运/耐力: %s", client.claim_energy())
+            elif cfg.claim_energy and cfg.antidetect.enabled and not dry_run:
+                logger.info("%s 跳过小茅运/耐力（随机）", task.label)
+
+            strat = _account_strategy(cfg, acc)
+            fixed = (acc.shop_id or "").strip() or None
+            ok, line = reserve_one_item(
+                client,
+                cfg,
+                task.item.code,
+                task.item.name,
+                p_c_map,
+                shop_details,
+                task.label,
+                dry_run,
+                strategy=strat,
+                fixed_shop_id=fixed,
+            )
+            if group_label:
+                line = f"[{group_label}] {line}"
+            all_lines.append(line)
+            if on_line:
+                on_line(line)
+            if not ok and not dry_run:
+                failed.append(task)
+        except (TokenExpiredError, SessionNotReadyError) as e:
+            line = f"❌ {e}"
+            if group_label:
+                line = f"[{group_label}] {line}"
+            all_lines.append(line)
+            if on_line:
+                on_line(line)
+            if not dry_run:
+                failed.append(task)
+        except Exception as e:
+            line = f"❌ {task.label}: {e}"
+            logger.exception(line)
+            if group_label:
+                line = f"[{group_label}] {line}"
+            all_lines.append(line)
+            if on_line:
+                on_line(line)
+            if not dry_run:
+                failed.append(task)
+
+    return all_lines, failed
+
+
 def _run_pass(
     cfg: AppConfig,
     accounts: list[AccountCredentials],
@@ -310,76 +411,46 @@ def _run_pass(
     else:
         work = attempts
 
-    prev_group: str | None = None
-    prev_mobile: str | None = None
-    for idx, task in enumerate(work):
-        acc = task.account
-        group = (acc.egress_group or "").strip()
-        new_account = acc.mobile != prev_mobile
-        if idx > 0 and not dry_run and new_account:
-            _account_gap(
-                cfg,
-                idx,
-                dry_run,
-                prev_group=prev_group or "",
-                curr_group=group,
-            )
-        prev_group = group
-        prev_mobile = acc.mobile
+    if not work:
+        return all_lines, failed
 
-        if TODAY > acc.end_date:
-            continue
+    by_group: dict[str, list[ItemAttempt]] = defaultdict(list)
+    for task in work:
+        by_group[_egress_key(task.account)].append(task)
 
-        client = IMaotaiClient(
-            acc,
-            app_version=app_ver,
-            proxy_pools=cfg.proxy_pools,
-            antidetect=cfg.antidetect,
-        )
-        try:
-            if not dry_run and attempts is None:
-                client.warmup()
-            prepare_account(client, cfg, dry_run)
-            p_c_map, shop_details = client.fetch_shop_map()
-            if _should_claim_energy(cfg) and not dry_run and attempts is None:
-                logger.info("小茅运/耐力: %s", client.claim_energy())
-            elif cfg.claim_energy and cfg.antidetect.enabled and not dry_run and attempts is None:
-                logger.info("%s 跳过小茅运/耐力（随机）", task.label)
+    use_parallel = (
+        cfg.reserve_parallel_by_egress
+        and not dry_run
+        and len(by_group) > 1
+    )
+    max_workers = max(1, min(cfg.reserve_max_workers, len(by_group)))
 
-            strat = _account_strategy(cfg, acc)
-            fixed = (acc.shop_id or "").strip() or None
-            ok, line = reserve_one_item(
-                client,
-                cfg,
-                task.item.code,
-                task.item.name,
-                p_c_map,
-                shop_details,
-                task.label,
-                dry_run,
-                strategy=strat,
-                fixed_shop_id=fixed,
-            )
-            all_lines.append(line)
+    if use_parallel:
+        logger.info("按出口组并行预约：%d 组，最多 %d 线程", len(by_group), max_workers)
+        line_lock = threading.Lock()
+
+        def _safe_on_line(line: str) -> None:
             if on_line:
-                on_line(line)
-            if not ok and not dry_run:
-                failed.append(task)
-        except (TokenExpiredError, SessionNotReadyError) as e:
-            line = f"❌ {e}"
-            all_lines.append(line)
-            if on_line:
-                on_line(line)
-            if not dry_run:
-                failed.append(task)
-        except Exception as e:
-            line = f"❌ {task.label}: {e}"
-            logger.exception(line)
-            all_lines.append(line)
-            if on_line:
-                on_line(line)
-            if not dry_run:
-                failed.append(task)
+                with line_lock:
+                    on_line(line)
+
+        def _run_group(gkey: str, tasks: list[ItemAttempt]) -> tuple[list[str], list[ItemAttempt]]:
+            label = gkey if gkey != "_direct" else "直连"
+            return _run_pass_tasks(cfg, app_ver, dry_run, tasks, _safe_on_line, group_label=label)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(_run_group, gkey, tasks): gkey
+                for gkey, tasks in by_group.items()
+            }
+            for fut in as_completed(futures):
+                g_lines, g_failed = fut.result()
+                all_lines.extend(g_lines)
+                failed.extend(g_failed)
+    else:
+        g_lines, g_failed = _run_pass_tasks(cfg, app_ver, dry_run, work, on_line)
+        all_lines.extend(g_lines)
+        failed.extend(g_failed)
 
     return all_lines, failed
 
@@ -404,14 +475,17 @@ def execute_reserve(
     app_ver = fetch_app_version()
     waves = [] if dry_run or skip_wait else (cfg.schedule.wave_times or [])
     ad = cfg.antidetect
+    groups = len({_egress_key(a) for a in active})
     logger.info(
-        "模式: %s | App %s | 策略: %s | 范围: %s | 波次: %s | 反检测: %s",
+        "模式: %s | App %s | 策略: %s | 范围: %s | 波次: %s | 反检测: %s | 出口组: %d | 并行: %s",
         "试跑" if dry_run else "正式",
         app_ver,
         cfg.shop_strategy,
         cfg.shop_scope,
         len(waves),
         "开" if ad.enabled else "关",
+        groups,
+        "是" if cfg.reserve_parallel_by_egress and groups > 1 and not dry_run else "否",
     )
 
     if not skip_wait and not dry_run:

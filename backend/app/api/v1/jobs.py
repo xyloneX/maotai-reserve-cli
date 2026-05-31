@@ -94,6 +94,10 @@ def cancel_job(job_id: int, db: Session = Depends(get_db), _: str = Depends(get_
     if not job:
         raise HTTPException(status_code=404, detail=fail(40001, "任务不存在"))
     if job.status in ("pending", "running"):
+        if job.job_type in ("batch_vcode", "batch_login"):
+            from ...services.batch_login_service import cancel_batch_job
+
+            cancel_batch_job(job_id)
         job.status = "cancelled"
         job.finished_at = datetime.now(timezone.utc)
         db.commit()
